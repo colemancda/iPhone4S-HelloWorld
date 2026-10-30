@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "Hello4S.h"
 
 @interface HelloViewController : UIViewController
 @end
@@ -9,16 +10,20 @@
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithRed:0.10 green:0.12 blue:0.16 alpha:1.0];
 
+    char greeting[128];
+    hello4s_greeting(greeting, sizeof greeting);
+
     UILabel *title = [[UILabel alloc] init];
-    title.text = @"Hello, iPhone 4S";
-    title.font = [UIFont boldSystemFontOfSize:28];
+    title.text = [NSString stringWithUTF8String:greeting];
+    title.font = [UIFont boldSystemFontOfSize:22];
     title.textColor = [UIColor whiteColor];
     title.textAlignment = NSTextAlignmentCenter;
+    title.numberOfLines = 0;
 
     UIDevice *device = [UIDevice currentDevice];
     UILabel *detail = [[UILabel alloc] init];
-    detail.text = [NSString stringWithFormat:@"%@ %@\nBuilt with Xcode clang for armv7",
-                   device.systemName, device.systemVersion];
+    detail.text = [NSString stringWithFormat:@"%@ %@\n1² + … + 10² = %ld (Swift)\nBuilt with Xcode clang + Embedded Swift for armv7",
+                   device.systemName, device.systemVersion, hello4s_sum_of_squares(10)];
     detail.font = [UIFont systemFontOfSize:15];
     detail.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
     detail.textAlignment = NSTextAlignmentCenter;
@@ -34,6 +39,7 @@
         [stack.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [stack.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
         [stack.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.leadingAnchor constant:20],
+        [stack.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.trailingAnchor constant:-20],
     ]];
 }
 

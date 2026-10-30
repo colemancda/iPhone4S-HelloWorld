@@ -1,8 +1,10 @@
-# Builds an armv7 / iOS 9 app for the iPhone 4S with the current Xcode's clang
-# and the iOS 9.3 SDK in ./sdk (from github.com/theos/sdks).
+# Builds an armv7 / iOS 9 app for the iPhone 4S with the current Xcode's clang,
+# Embedded Swift from a swift.org toolchain, and the iOS 9.3 SDK in ./sdk
+# (from github.com/theos/sdks).
 
 APP      := HelloWorld
 BUNDLE   := build/$(APP).app
+CLI      := build/hello-swift
 SDK      := sdk/iPhoneOS9.3.sdk
 MIN_IOS  := 9.0
 ARCH     := armv7
@@ -11,21 +13,31 @@ CC       := xcrun clang
 # -marm: Xcode 27's linker writes an even LC_MAIN entry offset for Thumb code,
 # so dyld enters a Thumb main() in ARM state and the app crashes at launch.
 CFLAGS   := -arch $(ARCH) -isysroot $(SDK) -miphoneos-version-min=$(MIN_IOS) \
-            -marm -fobjc-arc -O2 -Wall
-LDFLAGS  := -arch $(ARCH) -isysroot $(SDK) -miphoneos-version-min=$(MIN_IOS) \
-            -framework UIKit -framework Foundation
+            -marm -fobjc-arc -O2 -Wall -Iswift
+LDBASE   := -arch $(ARCH) -isysroot $(SDK) -miphoneos-version-min=$(MIN_IOS)
+LDFLAGS  := $(LDBASE) -framework UIKit -framework Foundation
+
+# Embedded Swift. Xcode's toolchain has no Embedded stdlib; swift.org's does,
+# for armv7-apple-none-macho (bare-metal armv7 Mach-O), which we link for iOS.
+# -marm: as for CFLAGS. -ffixed-r9: iOS lets callees clobber r9, but the
+# bare-metal target keeps values in it across calls into libSystem.
+SWIFT_TOOLCHAIN ?= $(HOME)/Library/Developer/Toolchains/swift-6.4.2-RELEASE.xctoolchain
+SWIFTC     := $(SWIFT_TOOLCHAIN)/usr/bin/swiftc
+SWIFTFLAGS := -target armv7-apple-none-macho -enable-experimental-feature Embedded \
+              -wmo -Osize -Xcc -marm -Xcc -ffixed-r9
+SWIFT_SRCS := $(wildcard swift/*.swift)
 
 # Install target on the jailbroken 4S (SSH over USB via iproxy, see README)
 SSH_CONF ?= /Volumes/4TB/Downloads/IPA/4s-ssh.conf
 SSH_HOST ?= 4s
 
 SRCS := $(wildcard src/*.m)
-OBJS := $(patsubst src/%.m,build/obj/%.o,$(SRCS))
+OBJS := $(patsubst src/%.m,build/obj/%.o,$(SRCS)) build/obj/swift.o
 
 # Preserved, unmodified copy of the SDK (sha256 in the .sha256 file next to it)
 SDK_ARCHIVE ?= /Volumes/4TB/Downloads/iPhoneOS9.3.sdk.tar.xz
 
-.PHONY: all clean ipa install sdk
+.PHONY: all clean ipa install sdk cli run-cli
 .DEFAULT_GOAL := all
 
 # Unpacks the SDK and drops i386/x86_64 from its .tbd stubs: Xcode 27's linker
@@ -35,12 +47,37 @@ sdk:
 	tar -xJf $(SDK_ARCHIVE) -C sdk
 	find $(SDK) -name '*.tbd' -type f -print0 | xargs -0 sed -i '' -E \
 	  's/(archs: *\[ armv7, armv7s, arm64), i386, x86_64 \]/\1 ]/'
+	# The stubs omit the mem* functions (Swift's stdlib calls them directly).
+	# libSystem re-exports libsystem_platform, so dyld finds them at run time.
+	perl -0pi -e 's/(symbols: *\[ )/$$1_bzero, _memcmp, _memcpy, _memmove, _memset, /' \
+	  $(SDK)/usr/lib/system/libsystem_platform.tbd
 
 all: $(BUNDLE)/$(APP)
 
-build/obj/%.o: src/%.m
+build/obj/%.o: src/%.m swift/Hello4S.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# The linker warns "no platform load command found" for Swift objects, since
+# they're built for a bare-metal target. It assumes iOS, which is what we want.
+build/obj/swift.o: $(SWIFT_SRCS)
+	@mkdir -p $(dir $@)
+	$(SWIFTC) $(SWIFTFLAGS) -parse-as-library -c $(SWIFT_SRCS) -o $@
+
+build/obj/cli.o: $(SWIFT_SRCS) cli/main.swift
+	@mkdir -p $(dir $@)
+	$(SWIFTC) $(SWIFTFLAGS) -c $(SWIFT_SRCS) cli/main.swift -o $@
+
+cli: $(CLI)
+
+$(CLI): build/obj/cli.o
+	$(CC) $(LDBASE) $< -o $@.tmp
+	ldid -S $@.tmp
+	mv $@.tmp $@
+
+# Copies the command-line tool to /var/root on the phone and runs it.
+run-cli: $(CLI)
+	ssh -F $(SSH_CONF) $(SSH_HOST) 'cat > /var/root/hello-swift && chmod 755 /var/root/hello-swift && /var/root/hello-swift' < $(CLI)
 
 $(BUNDLE)/$(APP): $(OBJS) src/Info.plist
 	@mkdir -p $(BUNDLE)
