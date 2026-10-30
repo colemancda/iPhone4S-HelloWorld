@@ -42,3 +42,16 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# iPhone4S-HelloWorld
+## Build artifacts (objects, signed .app, .ipa)
+build/
+*.o
+*.tmp
+
+## iOS 9.3 SDK (Apple's; re-create with `make sdk`)
+sdk/
+
+## macOS metadata
+.DS_Store
+._*
